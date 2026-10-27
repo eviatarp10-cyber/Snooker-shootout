@@ -1,7 +1,9 @@
 "use strict";
 
-const STORE_KEY = "shootout:v1";
+const STORE_KEY = "shootout:v2";
 const RING_LEN = 276.46; // 2πr for r = 44
+// Shot clock start modes: -1 = tap to start, 0 = immediately, N = N seconds after each shot.
+const SHOT_START_MODES = [-1, 0, 2, 3, 5];
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -25,7 +27,10 @@ function newGame(cfg) {
     ballInHand: false,
     matchMs: cfg.frameSec * 1000,
     shotMs: cfg.shot1 * 1000,
-    running: false,
+    frameRun: false,     // frame clock counting
+    shot: "idle",        // shot clock: "idle" (waiting) | "armed" (auto-start pending) | "run"
+    shotDelayMs: 0,      // time left before an armed shot clock starts
+    paused: true,        // global pause (overlay) — freezes both clocks
     started: false,
     timeUp: false,
     expiredAlerted: false,
@@ -41,7 +46,7 @@ function save() {
 function load() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && s.screen === "game") s.running = false; // never resume clocks silently after reload
+    if (s && s.screen === "game" && !s.timeUp) s.paused = true; // never resume clocks silently after reload
     return s;
   } catch { return null; }
 }
@@ -49,12 +54,36 @@ function load() {
 // ---------- Timing helpers ----------
 const late = () => S.matchMs <= S.cfg.switchSec * 1000;
 const shotLimit = () => (late() ? S.cfg.shot2 : S.cfg.shot1);
-const resetShot = () => { S.shotMs = shotLimit() * 1000; S.expiredAlerted = false; };
 const other = (p) => 1 - p;
+
+// After every shot the shot clock goes back to full and waits (or auto-starts per setting).
+function resetShot() {
+  S.shotMs = shotLimit() * 1000;
+  S.expiredAlerted = false;
+  const mode = S.cfg.shotStart;
+  if (mode < 0) S.shot = "idle";
+  else if (mode === 0) S.shot = "run";
+  else { S.shot = "armed"; S.shotDelayMs = mode * 1000; }
+}
+function startShot() {
+  if (S.shotMs <= 0) S.shotMs = shotLimit() * 1000;
+  S.expiredAlerted = false;
+  S.shot = "run";
+}
+function stopShot() {
+  S.shotMs = shotLimit() * 1000;
+  S.expiredAlerted = false;
+  S.shot = "idle";
+}
 
 function fmtClock(ms) {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+function shotStartLabel(mode) {
+  if (mode < 0) return "Tap to start";
+  if (mode === 0) return "Immediately";
+  return `Auto after ${mode}s`;
 }
 
 // ---------- Undo ----------
@@ -69,7 +98,7 @@ function undo() {
   const snap = S.history.pop();
   if (!snap) return;
   Object.assign(S, snap);
-  resetShot();
+  stopShot();
   commit();
 }
 
@@ -112,21 +141,48 @@ function setTurn(p) {
   commit();
 }
 
-function startClock() {
+// Start (first time) or resume from the global pause.
+function resume() {
   unlockAudio();
-  S.running = true;
-  S.started = true;
+  if (!S.started) {
+    S.started = true;
+    S.frameRun = true;
+    S.shot = "run"; // the break is on the clock straight away
+  }
+  S.paused = false;
   lastTick = performance.now();
   requestWakeLock();
   commit();
 }
-function pauseClock() {
-  S.running = false;
+function pauseAll() {
+  S.paused = true;
+  commit();
+}
+function toggleFrame() {
+  if (S.paused || S.timeUp) return;
+  S.frameRun = !S.frameRun;
+  commit();
+}
+function toggleShot() {
+  if (S.paused || S.timeUp) return;
+  unlockAudio();
+  if (S.shot === "run") stopShot();
+  else startShot();
+  closeSheets();
+  commit();
+}
+function adjustFrame(deltaSec) {
+  const max = S.cfg.frameSec * 1000;
+  const wasLate = late();
+  S.matchMs = Math.min(max, Math.max(1000, S.matchMs + deltaSec * 1000));
+  if (wasLate !== late() && S.shot !== "run") S.shotMs = shotLimit() * 1000;
   commit();
 }
 
 function finishFrame() {
-  S.running = false;
+  S.paused = true;
+  S.frameRun = false;
+  S.shot = "idle";
   const [a, b] = S.players;
   if (a.score === b.score) {
     S.screen = "blue";
@@ -138,7 +194,6 @@ function finishFrame() {
 }
 function showResult(winner, note) {
   S.screen = "result";
-  S.running = false;
   S.result = { winner, note };
   releaseWakeLock();
 }
@@ -172,44 +227,55 @@ function blueUndo() {
 // ---------- Tick ----------
 function tick(now) {
   requestAnimationFrame(tick);
-  if (S.screen !== "game" || !S.running) { lastTick = now; return; }
   const dt = now - lastTick;
   lastTick = now;
+  if (S.screen !== "game" || S.paused || S.timeUp) return;
 
-  const wasLate = late();
-  const prevShotSec = Math.ceil(S.shotMs / 1000);
-  S.matchMs -= dt;
-  S.shotMs -= dt;
+  let changed = false;
 
-  // Entering the late phase: the shot clock drops to the shorter limit.
-  if (!wasLate && late()) {
-    S.shotMs = Math.min(S.shotMs, S.cfg.shot2 * 1000);
-    beep(660, 0.15); setTimeout(() => beep(660, 0.15), 220);
+  if (S.frameRun) {
+    const wasLate = late();
+    S.matchMs -= dt;
+    // Entering the late phase: the shot clock drops to the shorter limit.
+    if (!wasLate && late()) {
+      S.shotMs = S.shot === "run" ? Math.min(S.shotMs, S.cfg.shot2 * 1000) : S.cfg.shot2 * 1000;
+      beep(660, 0.15); setTimeout(() => beep(660, 0.15), 220);
+    }
+    if (S.matchMs <= 0) {
+      S.matchMs = 0;
+      S.frameRun = false;
+      S.shot = "idle";
+      S.timeUp = true;
+      closeSheets();
+      beep(440, 1.2);
+      vibrate([400, 150, 400]);
+      commit();
+      return;
+    }
   }
 
-  const shotSec = Math.ceil(S.shotMs / 1000);
-  if (shotSec !== prevShotSec && shotSec > 0 && shotSec <= 5) {
-    beep(shotSec === 1 ? 1100 : 990, 0.07);
-    vibrate(40);
+  if (S.shot === "armed") {
+    S.shotDelayMs -= dt;
+    if (S.shotDelayMs <= 0) { S.shot = "run"; changed = true; }
+  } else if (S.shot === "run" && !S.expiredAlerted) {
+    const prevSec = Math.ceil(S.shotMs / 1000);
+    S.shotMs -= dt;
+    const sec = Math.ceil(S.shotMs / 1000);
+    if (sec !== prevSec && sec > 0 && sec <= 5) {
+      beep(sec === 1 ? 1100 : 990, 0.07);
+      vibrate(40);
+    }
+    if (S.shotMs <= 0) {
+      S.shotMs = 0;
+      S.expiredAlerted = true;
+      beep(330, 0.6);
+      vibrate([200, 100, 200]);
+      openSheet("expired");
+      changed = true;
+    }
   }
-  if (S.shotMs <= 0 && !S.expiredAlerted) {
-    S.shotMs = 0;
-    S.expiredAlerted = true;
-    beep(330, 0.6);
-    vibrate([200, 100, 200]);
-    openSheet("expired");
-  }
-  if (S.matchMs <= 0) {
-    S.matchMs = 0;
-    S.running = false;
-    S.timeUp = true;
-    closeSheets();
-    beep(440, 1.2);
-    vibrate([400, 150, 400]);
-    openSheet("timeup");
-    commit();
-    return;
-  }
+
+  if (changed) save();
   renderClocks();
 }
 
@@ -220,6 +286,7 @@ function show(id) {
 
 function render() {
   show(S.screen);
+  $("#timeup-sheet").hidden = !(S.screen === "game" && S.timeUp);
   if (S.screen === "setup") return renderSetup();
   if (S.screen === "game") return renderGame();
   if (S.screen === "blue") return renderBlue();
@@ -237,6 +304,7 @@ function renderSetup() {
     f.shot1.value = last.shot1;
     f.shot2.value = last.shot2;
     f.timeFoul.value = last.timeFoul;
+    f.shotStart.value = last.shotStart ?? -1;
     f.dataset.filled = "1";
   }
   syncBreakerLabels();
@@ -249,10 +317,12 @@ function syncBreakerLabels() {
 }
 
 function renderClocks() {
-  const mc = $(".match-clock");
+  const mc = $("#match-clock");
   $("#match-time").textContent = fmtClock(S.matchMs);
   mc.classList.toggle("late", late() && S.matchMs > 60000);
   mc.classList.toggle("final", S.matchMs <= 60000);
+  mc.classList.toggle("stopped", !S.frameRun);
+  $("#frame-state").textContent = S.frameRun ? "" : "Stopped";
   $("#phase-label").textContent = `${shotLimit()}s per shot`;
 
   const limit = shotLimit() * 1000;
@@ -260,8 +330,14 @@ function renderClocks() {
   $("#shot-time").textContent = sec;
   $("#shot-ring").style.strokeDashoffset = RING_LEN * (1 - Math.max(0, S.shotMs) / limit);
   const sc = $("#shot-clock");
-  sc.classList.toggle("warn", sec <= 5 && sec > 0);
-  sc.classList.toggle("out", sec === 0);
+  const running = S.shot === "run";
+  sc.classList.toggle("idle", !running);
+  sc.classList.toggle("warn", running && sec <= 5 && sec > 0);
+  sc.classList.toggle("out", running && sec === 0);
+  $("#shot-state").textContent =
+    S.shot === "idle" ? "▶ Start"
+    : S.shot === "armed" ? `In ${Math.max(1, Math.ceil(S.shotDelayMs / 1000))}s`
+    : sec === 0 ? "Time!" : "■ Stop";
 }
 
 function renderGame() {
@@ -275,20 +351,17 @@ function renderGame() {
     $(".brk", el).textContent = S.turn === i && S.brk > 0 ? `Break ${S.brk}` : "";
   });
   $("#btn-undo").disabled = $("#btn-timeup-undo").disabled = S.history.length === 0;
-  $("#btn-pause").textContent = S.running ? "Pause" : "Resume";
   $("#btn-sound").textContent = `Sound: ${S.sound ? "on" : "off"}`;
+  $("#btn-shotstart").textContent = `Shot clock: ${shotStartLabel(S.cfg.shotStart)}`;
 
   const overlay = $("#start-overlay");
-  overlay.hidden = S.running || S.timeUp;
-  if (!S.running) {
-    $("#start-msg").textContent = !S.started
-      ? `${S.players[S.turn].name} to break`
-      : "Paused";
+  overlay.hidden = !S.paused || S.timeUp;
+  if (S.paused) {
+    $("#start-msg").textContent = !S.started ? `${S.players[S.turn].name} to break` : "Paused";
     $("#btn-go").textContent = S.started ? "Resume" : "Start clock";
   }
 
   if (S.timeUp) {
-    $("#timeup-sheet").hidden = false;
     const [a, b] = S.players;
     $("#timeup-score").textContent = `${a.name} ${a.score} – ${b.score} ${b.name}`;
   }
@@ -375,7 +448,7 @@ async function requestWakeLock() {
 }
 function releaseWakeLock() { wakeLock?.release?.(); wakeLock = null; }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && S.running) requestWakeLock();
+  if (document.visibilityState === "visible" && S.screen === "game" && !S.paused) requestWakeLock();
 });
 
 // ---------- Wiring ----------
@@ -397,11 +470,11 @@ $("#setup-form").addEventListener("submit", (e) => {
     shot1: clampNum(f.shot1.value, 3, 120, 15),
     shot2: clampNum(f.shot2.value, 3, 120, 10),
     timeFoul: clampNum(f.timeFoul.value, 0, 20, 5),
+    shotStart: Number(f.shotStart.value),
   };
   unlockAudio();
-  const lastCfg = cfg;
   S = newGame(cfg);
-  S.lastCfg = lastCfg;
+  S.lastCfg = cfg;
   S.shotMs = shotLimit() * 1000;
   commit();
 });
@@ -414,10 +487,11 @@ $("#btn-miss").addEventListener("click", endTurn);
 $("#btn-foul").addEventListener("click", () => openSheet("foul"));
 $("#btn-undo").addEventListener("click", undo);
 $("#btn-timeup-undo").addEventListener("click", undo);
-$("#btn-pause").addEventListener("click", () => (S.running ? pauseClock() : startClock()));
-$("#btn-go").addEventListener("click", startClock);
+$("#btn-pause").addEventListener("click", pauseAll);
+$("#btn-go").addEventListener("click", resume);
 $("#btn-menu").addEventListener("click", () => openSheet("menu"));
-$("#shot-clock").addEventListener("click", () => { resetShot(); closeSheets(); renderClocks(); save(); });
+$("#shot-clock").addEventListener("click", toggleShot);
+$("#match-clock").addEventListener("click", toggleFrame);
 
 for (const b of $$("#foul-sheet [data-f]")) {
   b.addEventListener("click", () => { closeSheets(); foul(Number(b.dataset.f)); });
@@ -425,10 +499,17 @@ for (const b of $$("#foul-sheet [data-f]")) {
 $("#btn-timefoul").addEventListener("click", () => { closeSheets(); foul(S.cfg.timeFoul); });
 for (const b of $$("[data-close]")) b.addEventListener("click", () => {
   closeSheets();
-  if (b.closest("#expired-sheet")) { resetShot(); renderClocks(); }
+  if (b.closest("#expired-sheet")) { stopShot(); commit(); }
 });
 
-$("#btn-finish").addEventListener("click", () => { $("#timeup-sheet").hidden = true; finishFrame(); });
+for (const b of $$("[data-adj]")) b.addEventListener("click", () => adjustFrame(Number(b.dataset.adj)));
+$("#btn-shotstart").addEventListener("click", () => {
+  const i = SHOT_START_MODES.indexOf(S.cfg.shotStart);
+  S.cfg.shotStart = SHOT_START_MODES[(i + 1) % SHOT_START_MODES.length];
+  S.lastCfg = { ...S.lastCfg, shotStart: S.cfg.shotStart };
+  commit();
+});
+$("#btn-finish").addEventListener("click", () => { S.timeUp = false; finishFrame(); });
 $("#btn-end").addEventListener("click", () => {
   if (!confirm("End the frame now (e.g. all balls potted)?")) return;
   closeSheets();
@@ -450,9 +531,7 @@ $("#blue-swap").addEventListener("click", () => { S.blue.first = other(S.blue.fi
 
 $("#btn-rematch").addEventListener("click", () => {
   const cfg = { ...S.cfg, breaker: other(S.cfg.breaker) };
-  const sound = S.sound;
   S = newGame(cfg);
-  S.sound = sound;
   S.lastCfg = cfg;
   S.shotMs = shotLimit() * 1000;
   commit();
@@ -465,10 +544,12 @@ $("#btn-new").addEventListener("click", () => {
 // Keyboard shortcuts (handy on a laptop next to the table)
 document.addEventListener("keydown", (e) => {
   if (S.screen !== "game" || e.target.tagName === "INPUT") return;
-  if (e.key === "p") return S.running ? pauseClock() : startClock();
-  if (!S.running || $$(".overlay[id$='-sheet']").some((el) => !el.hidden)) return;
+  if (e.key === "p") return S.paused ? resume() : pauseAll();
+  if (S.paused || $$(".overlay[id$='-sheet']").some((el) => !el.hidden)) return;
   if (e.key >= "1" && e.key <= "7") pot(Number(e.key));
-  else if (e.key === " " || e.key === "Enter") { e.preventDefault(); endTurn(); }
+  else if (e.key === "Enter") endTurn();
+  else if (e.key === " ") { e.preventDefault(); toggleShot(); }
+  else if (e.key === "m") toggleFrame();
   else if (e.key === "f") openSheet("foul");
   else if (e.key === "z" || e.key === "Backspace") undo();
 });

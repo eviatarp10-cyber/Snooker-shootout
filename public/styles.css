@@ -61,7 +61,7 @@ input { -webkit-user-select: text; user-select: text; }
 .card.center { align-items: stretch; text-align: center; }
 
 label { display: flex; flex-direction: column; gap: 6px; font-size: .9rem; color: var(--muted); }
-input[type=text], input:not([type]), input[type=number] {
+input[type=text], input:not([type]), input[type=number], select {
   font: inherit; color: var(--ink);
   background: rgba(255, 255, 255, .07);
   border: 1px solid var(--line);
@@ -112,6 +112,14 @@ details summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
   background: rgba(0, 0, 0, .25); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 12px 16px;
 }
+.match-clock {
+  font: inherit; color: inherit; text-align: left; background: none; border: 0; padding: 0; cursor: pointer;
+}
+.match-clock.stopped .time { opacity: .45; }
+.badge:not(:empty) {
+  display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 99px;
+  background: var(--danger); color: #fff; font-weight: 700; letter-spacing: .5px;
+}
 .match-clock .label { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: 1px; }
 .match-clock .time { font-size: clamp(2.8rem, 13vw, 4.4rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
 .match-clock .hint { color: var(--muted); font-size: .85rem; margin-top: 4px; }
@@ -130,6 +138,14 @@ details summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
   position: absolute; inset: 0; display: grid; place-items: center;
   font-size: clamp(2.4rem, 11vw, 3.4rem); font-weight: 800; font-variant-numeric: tabular-nums;
 }
+.shot-clock small {
+  position: absolute; left: 0; right: 0; bottom: 20%; text-align: center;
+  font-size: .62rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+}
+.shot-clock span { padding-bottom: 8%; }
+.shot-clock.idle .ring { stroke: rgba(255, 255, 255, .35); }
+.shot-clock.idle span { opacity: .55; }
+.shot-clock.idle small { color: var(--gold); }
 .shot-clock.warn .ring { stroke: var(--warn); }
 .shot-clock.warn span { color: var(--warn); }
 .shot-clock.out .ring { stroke: var(--danger); }
@@ -182,6 +198,8 @@ details summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
 .lead { font-size: 1.2rem; font-weight: 700; margin: 0; }
 .hint { color: var(--muted); margin: 0; }
 .center { text-align: center; }
+.adj { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.adj .btn { padding: 12px 0; }
 .foul-pts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .foul-pts .btn { font-size: 1.4rem; padding: 16px 0; }
 
@@ -221,5 +239,6 @@ details summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
   .match-clock .time { font-size: 2.6rem; }
   .shot-clock { width: 84px; }
   .shot-clock span { font-size: 2.2rem; }
+  .shot-clock small { font-size: .55rem; bottom: 17%; }
   .player .score { font-size: 3rem; }
 }

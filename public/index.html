@@ -44,6 +44,15 @@
           <label>Shot clock – early (s)<input name="shot1" type="number" min="3" max="120" value="15"></label>
           <label>Shot clock – late (s)<input name="shot2" type="number" min="3" max="120" value="10"></label>
           <label>Time foul penalty<input name="timeFoul" type="number" min="0" max="20" value="5"></label>
+          <label>Shot clock starts
+            <select name="shotStart">
+              <option value="-1" selected>Tap to start</option>
+              <option value="0">Immediately</option>
+              <option value="2">Auto after 2s</option>
+              <option value="3">Auto after 3s</option>
+              <option value="5">Auto after 5s</option>
+            </select>
+          </label>
         </div>
       </details>
 
@@ -58,6 +67,7 @@
         <li>Every shot must pot a ball or a ball must hit a cushion — otherwise it's a foul.</li>
         <li>Every foul gives the opponent ball in hand.</li>
         <li>Running out of shot clock is a time foul (5 points).</li>
+        <li>The shot clock starts once the balls have stopped — tap it to start; tap the frame clock to stop or restart the frame time.</li>
         <li>Highest score when time runs out wins. A tie goes to a blue ball shoot-out.</li>
       </ul>
     </details>
@@ -66,17 +76,18 @@
   <!-- Game -->
   <section id="game" class="screen" hidden>
     <div class="clocks">
-      <div class="match-clock">
-        <div class="label">Frame</div>
+      <button id="match-clock" class="match-clock" aria-label="Start or stop the frame clock">
+        <div class="label">Frame <span id="frame-state" class="badge"></span></div>
         <div id="match-time" class="time">10:00</div>
         <div id="phase-label" class="hint">15s per shot</div>
-      </div>
-      <button id="shot-clock" class="shot-clock" aria-label="Reset shot clock">
+      </button>
+      <button id="shot-clock" class="shot-clock" aria-label="Start or stop the shot clock">
         <svg viewBox="0 0 100 100" aria-hidden="true">
           <circle class="track" cx="50" cy="50" r="44"/>
           <circle id="shot-ring" class="ring" cx="50" cy="50" r="44"/>
         </svg>
         <span id="shot-time">15</span>
+        <small id="shot-state"></small>
       </button>
     </div>
 
@@ -196,6 +207,14 @@
   <div id="menu-sheet" class="overlay" hidden>
     <div class="card center">
       <p class="lead">Menu</p>
+      <p class="hint">Adjust frame clock</p>
+      <div class="adj">
+        <button class="btn" data-adj="-60">−1m</button>
+        <button class="btn" data-adj="-10">−10s</button>
+        <button class="btn" data-adj="10">+10s</button>
+        <button class="btn" data-adj="60">+1m</button>
+      </div>
+      <button id="btn-shotstart" class="btn ghost">Shot clock: Tap to start</button>
       <button id="btn-end" class="btn primary">End frame now</button>
       <button id="btn-sound" class="btn ghost">Sound: on</button>
       <button id="btn-abandon" class="btn danger">Abandon frame</button>
