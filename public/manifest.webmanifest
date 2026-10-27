@@ -1,0 +1,11 @@
+{
+  "name": "Snooker Shoot Out",
+  "short_name": "Shoot Out",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b3d2a",
+  "theme_color": "#0b3d2a",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

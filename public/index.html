@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b3d2a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Snooker Shoot Out</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/icon.svg">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+  <!-- Setup -->
+  <section id="setup" class="screen">
+    <header class="brand">
+      <div class="logo">●</div>
+      <h1>Snooker Shoot Out</h1>
+      <p class="sub">One frame · 10 minutes · shot clock</p>
+    </header>
+
+    <form id="setup-form" class="card" autocomplete="off">
+      <label>Player 1
+        <input name="p1" maxlength="20" placeholder="Player 1" required>
+      </label>
+      <label>Player 2
+        <input name="p2" maxlength="20" placeholder="Player 2" required>
+      </label>
+
+      <fieldset class="seg">
+        <legend>Who breaks?</legend>
+        <label><input type="radio" name="breaker" value="0" checked><span>Player 1</span></label>
+        <label><input type="radio" name="breaker" value="1"><span>Player 2</span></label>
+      </fieldset>
+
+      <details>
+        <summary>Timing</summary>
+        <div class="grid2">
+          <label>Frame (min)<input name="frameMin" type="number" min="1" max="60" value="10"></label>
+          <label>Switch at (min left)<input name="switchMin" type="number" min="0" max="60" value="5"></label>
+          <label>Shot clock – early (s)<input name="shot1" type="number" min="3" max="120" value="15"></label>
+          <label>Shot clock – late (s)<input name="shot2" type="number" min="3" max="120" value="10"></label>
+          <label>Time foul penalty<input name="timeFoul" type="number" min="0" max="20" value="5"></label>
+        </div>
+      </details>
+
+      <button class="btn primary big" type="submit">Start frame</button>
+    </form>
+
+    <details class="card rules">
+      <summary>Shoot Out rules</summary>
+      <ul>
+        <li>One frame, maximum 10 minutes.</li>
+        <li>15 seconds per shot in the first 5 minutes, 10 seconds in the last 5.</li>
+        <li>Every shot must pot a ball or a ball must hit a cushion — otherwise it's a foul.</li>
+        <li>Every foul gives the opponent ball in hand.</li>
+        <li>Running out of shot clock is a time foul (5 points).</li>
+        <li>Highest score when time runs out wins. A tie goes to a blue ball shoot-out.</li>
+      </ul>
+    </details>
+  </section>
+
+  <!-- Game -->
+  <section id="game" class="screen" hidden>
+    <div class="clocks">
+      <div class="match-clock">
+        <div class="label">Frame</div>
+        <div id="match-time" class="time">10:00</div>
+        <div id="phase-label" class="hint">15s per shot</div>
+      </div>
+      <button id="shot-clock" class="shot-clock" aria-label="Reset shot clock">
+        <svg viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="track" cx="50" cy="50" r="44"/>
+          <circle id="shot-ring" class="ring" cx="50" cy="50" r="44"/>
+        </svg>
+        <span id="shot-time">15</span>
+      </button>
+    </div>
+
+    <div class="players">
+      <button class="player" data-p="0">
+        <div class="name"></div>
+        <div class="score">0</div>
+        <div class="meta"><span class="brk"></span><span class="bih">Ball in hand</span></div>
+      </button>
+      <button class="player" data-p="1">
+        <div class="name"></div>
+        <div class="score">0</div>
+        <div class="meta"><span class="brk"></span><span class="bih">Ball in hand</span></div>
+      </button>
+    </div>
+
+    <div class="balls" role="group" aria-label="Pot a ball">
+      <button class="ball red" data-v="1">1</button>
+      <button class="ball yellow" data-v="2">2</button>
+      <button class="ball green" data-v="3">3</button>
+      <button class="ball brown" data-v="4">4</button>
+      <button class="ball blue" data-v="5">5</button>
+      <button class="ball pink" data-v="6">6</button>
+      <button class="ball black" data-v="7">7</button>
+    </div>
+
+    <div class="actions">
+      <button id="btn-miss" class="btn primary">End turn</button>
+      <button id="btn-foul" class="btn danger">Foul</button>
+      <button id="btn-undo" class="btn ghost" aria-label="Undo">↶ Undo</button>
+      <button id="btn-pause" class="btn ghost">Pause</button>
+    </div>
+
+    <div id="start-overlay" class="overlay">
+      <div class="card center">
+        <p id="start-msg" class="lead">Ready to break</p>
+        <button id="btn-go" class="btn primary big">Start clock</button>
+        <button id="btn-menu" class="btn ghost">Menu</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Blue ball shoot-out -->
+  <section id="blue" class="screen" hidden>
+    <header class="brand small">
+      <div class="logo blue-dot">●</div>
+      <h1>Blue ball shoot-out</h1>
+      <p class="sub">Cue ball in the D, blue on its spot. Alternate shots — most blues from equal attempts wins.</p>
+    </header>
+    <div class="blue-rows" id="blue-rows"></div>
+    <p class="lead center" id="blue-turn"></p>
+    <div class="actions two">
+      <button id="blue-pot" class="btn primary big">Potted</button>
+      <button id="blue-miss" class="btn danger big">Missed</button>
+    </div>
+    <div class="actions two">
+      <button id="blue-undo" class="btn ghost">↶ Undo</button>
+      <button id="blue-swap" class="btn ghost">Swap who shoots first</button>
+    </div>
+  </section>
+
+  <!-- Result -->
+  <section id="result" class="screen" hidden>
+    <div class="card center result">
+      <div class="trophy">🏆</div>
+      <h1 id="winner-name"></h1>
+      <p id="final-score" class="lead"></p>
+      <p id="final-note" class="hint"></p>
+      <button id="btn-rematch" class="btn primary big">Rematch</button>
+      <button id="btn-new" class="btn ghost">New players</button>
+    </div>
+  </section>
+
+  <!-- Sheets -->
+  <div id="foul-sheet" class="overlay" hidden>
+    <div class="card center">
+      <p class="lead">Foul by <b id="foul-by"></b></p>
+      <p class="hint">Points to opponent · ball in hand</p>
+      <div class="foul-pts">
+        <button class="btn" data-f="4">4</button>
+        <button class="btn" data-f="5">5</button>
+        <button class="btn" data-f="6">6</button>
+        <button class="btn" data-f="7">7</button>
+      </div>
+      <button class="btn ghost" data-close>Cancel</button>
+    </div>
+  </div>
+
+  <div id="expired-sheet" class="overlay" hidden>
+    <div class="card center">
+      <p class="lead">⏱ Shot clock expired</p>
+      <p class="hint" id="expired-hint"></p>
+      <button id="btn-timefoul" class="btn danger big">Time foul</button>
+      <button class="btn ghost" data-close>Shot was played in time</button>
+    </div>
+  </div>
+
+  <div id="timeup-sheet" class="overlay" hidden>
+    <div class="card center">
+      <p class="lead">Time's up!</p>
+      <p class="hint">Record the last shot if a ball went in, then finish.</p>
+      <div class="balls mini" role="group" aria-label="Last pot">
+        <button class="ball red" data-v="1">1</button>
+        <button class="ball yellow" data-v="2">2</button>
+        <button class="ball green" data-v="3">3</button>
+        <button class="ball brown" data-v="4">4</button>
+        <button class="ball blue" data-v="5">5</button>
+        <button class="ball pink" data-v="6">6</button>
+        <button class="ball black" data-v="7">7</button>
+      </div>
+      <p id="timeup-score" class="hint"></p>
+      <button id="btn-finish" class="btn primary big">Finish frame</button>
+      <button id="btn-timeup-undo" class="btn ghost">↶ Undo</button>
+    </div>
+  </div>
+
+  <div id="menu-sheet" class="overlay" hidden>
+    <div class="card center">
+      <p class="lead">Menu</p>
+      <button id="btn-end" class="btn primary">End frame now</button>
+      <button id="btn-sound" class="btn ghost">Sound: on</button>
+      <button id="btn-abandon" class="btn danger">Abandon frame</button>
+      <button class="btn ghost" data-close>Close</button>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
